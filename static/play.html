@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>围棋对弈</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+    <style>
+        .board-intersection:hover {
+            background-color: rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+<div id="root"></div>
+
+<script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const GoBoard = () => {
+        const [board, setBoard] = useState(Array(9).fill().map(() => Array(9).fill(0)));
+        const [capturedStones, setCapturedStones] = useState({ black: 0, white: 0 });
+        const [moveCount, setMoveCount] = useState(0);
+        const [isPlayerTurn, setIsPlayerTurn] = useState(true);
+        const [message, setMessage] = useState('');
+
+        // 处理玩家落子
+        const handleMove = async (row, col) => {
+            if (!isPlayerTurn) {
+                setMessage('等待AI响应中...');
+                return;
+            }
+
+            if (board[row][col] !== 0) {
+                setMessage('该位置已有棋子');
+                return;
+            }
+
+            try {
+                // 更新本地棋盘状态 - 玩家落子（黑子）
+                const newBoard = board.map(row => [...row]);
+                newBoard[row][col] = 1; // 黑子用1表示
+                setBoard(newBoard);
+                setIsPlayerTurn(false);
+                setMessage('等待AI响应...');
+
+                // 发送请求到后端
+                const response = await fetch('http://localhost:5001/api/go/move', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        board: newBoard,
+                        currentPlayer: 'black'
+                    }),
+                });
+
+                if (!response.ok) throw new Error('Network response was not ok');
+
+                const data = await response.json();
+
+                // 处理AI的响应
+                if (data.gameState && data.gameState.board) {
+                    console.log("接收到的新棋盘状态:", data.gameState.board);
+
+                    // 直接使用后端返回的棋盘状态
+                    setBoard(data.gameState.board);
+                    setMoveCount(prev => prev + 2); // 计数+2因为包含了玩家和AI的两步棋
+                    setCapturedStones(data.gameState.capturedStones || { black: 0, white: 0 });
+
+                    if (data.gameState.lastMove) {
+                        console.log(`AI落子位置: (${data.gameState.lastMove.x}, ${data.gameState.lastMove.y})`);
+                    }
+
+                    setIsPlayerTurn(true);
+                    setMessage('轮到您下棋');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                setMessage('发生错误，请重试');
+                setIsPlayerTurn(true);
+            }
+        };
+
+        // 重置游戏
+        const resetGame = async () => {
+            try {
+                const response = await fetch('http://localhost:5001/api/go/reset', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error('Network response was not ok');
+
+                const data = await response.json();
+                setBoard(data.board);
+                setCapturedStones({ black: 0, white: 0 });
+                setMoveCount(0);
+                setIsPlayerTurn(true);
+                setMessage('游戏已重置');
+            } catch (error) {
+                console.error('Error resetting game:', error);
+                setMessage('重置游戏失败');
+            }
+        };
+
+        return (
+            <div className="container mx-auto px-4 py-8">
+                <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+                    <div className="text-xl font-bold text-center mb-4">
+                        {isPlayerTurn ? '轮到您下棋（黑棋）' : 'AI思考中（白棋）'}
+                    </div>
+
+                    {message && (
+                        <div className="text-center text-gray-600 mb-4">
+                            {message}
+                        </div>
+                    )}
+
+                    <div className="relative w-full aspect-square bg-yellow-100 p-2 mb-4">
+                        <div className="grid grid-cols-9 gap-0 w-full h-full border border-black">
+                            {board.map((row, i) => (
+                                row.map((cell, j) => (
+                                    <div
+                                        key={`${i}-${j}`}
+                                        className="relative border border-black board-intersection"
+                                        onClick={() => handleMove(i, j)}
+                                    >
+                                        {cell !== 0 && (
+                                            <div
+                                                className={`absolute inset-2 rounded-full ${
+                                                    cell === 2 ? 'bg-white border-2 border-black' : 'bg-black'
+                                                }`}
+                                            />
+                                        )}
+                                    </div>
+                                ))
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="flex justify-center gap-4 mb-4">
+                        <button
+                            onClick={resetGame}
+                            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                        >
+                            重新开始
+                        </button>
+                    </div>
+
+                    <div className="text-center">
+                        <h3 className="text-lg font-semibold mb-2">游戏信息：</h3>
+                        <div className="text-gray-600">
+                            已下子数：{moveCount}<br />
+                            提子数：黑 {capturedStones.black} / 白 {capturedStones.white}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<GoBoard />);
+</script>
+</body>
+</html>
